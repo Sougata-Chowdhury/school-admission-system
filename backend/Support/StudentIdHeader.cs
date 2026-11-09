@@ -30,6 +30,13 @@ public static class StudentIdHeader
             return false;
         }
 
+        if (value.Contains('\0'))
+        {
+            error = new BadRequestObjectResult(
+                new { message = $"{Name} contains an invalid character." });
+            return false;
+        }
+
         studentId = value;
         return true;
     }

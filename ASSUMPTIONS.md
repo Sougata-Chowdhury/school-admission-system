@@ -24,6 +24,9 @@ The brief leaves some details open. These are the choices made, and why.
 - **Duplicate class names are allowed.** The brief does not require unique
   names, and schools may legitimately create similarly named sections. The
   frontend identifies entries by ID.
+- **Class name validation.** Names are trimmed and must be non-empty, at most
+  255 characters, and contain no NUL character (which PostgreSQL text cannot
+  store); violations return `400`.
 - **`totalSeats` must be at least 1.** A class with zero seats cannot admit
   anyone and is treated as invalid input.
 - **Seat definitions:**

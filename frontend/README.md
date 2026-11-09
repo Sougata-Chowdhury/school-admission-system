@@ -1,16 +1,23 @@
-# React + Vite
+# Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React 18 + Vite UI for the School Admission System. The root
+[`README.md`](../README.md) covers running the whole stack with Docker, the API,
+configuration and the required tests.
 
-Currently, two official plugins are available:
+## Commands
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+```bash
+npm ci
+npm run dev      # local Vite dev server
+npm run build    # production build
+npm test         # Vitest + Testing Library
+```
 
-## React Compiler
+In Docker the backend URL comes from `VITE_API_BASE_URL` at container start; the
+nginx entrypoint writes it into `/config.js`. For local development, copy a
+different URL into `public/config.js` if the API is not on
+`http://localhost:8080`.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+The UI has two surfaces in one no-login app: the Parent Portal (identity,
+applications, seat cards) and the Administrator console (create class, live
+class list). Both are documented in the root README.

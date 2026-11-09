@@ -171,12 +171,9 @@ public class AdmissionService
             return (null, "Application not found.", 404);
         }
 
-        if (hold.Status == HeldStatus && hold.ExpiresAt <= DateTime.UtcNow)
-        {
-            hold.Status = ExpiredStatus;
-            await _dbContext.SaveChangesAsync();
-        }
-
+        // Do not write here. The response mapper reports an overdue HELD row as
+        // EXPIRED, and the background worker persists that transition. Writing
+        // from a read could overwrite a concurrent confirmation.
         return (MapToHoldResponse(hold), null, 200);
     }
 
@@ -318,25 +315,15 @@ public class AdmissionService
 
     public async Task<List<HoldResponse>> GetStudentHoldsAsync(string studentId)
     {
-        var now = DateTime.UtcNow;
         var holds = await _dbContext.Holds
             .Include(h => h.Class)
             .Where(h => h.StudentId == studentId)
             .OrderByDescending(h => h.CreatedAt)
             .ToListAsync();
 
-        var changed = false;
-        foreach (var hold in holds.Where(h => h.Status == HeldStatus && h.ExpiresAt <= now))
-        {
-            hold.Status = ExpiredStatus;
-            changed = true;
-        }
-
-        if (changed)
-        {
-            await _dbContext.SaveChangesAsync();
-        }
-
+        // MapToHoldResponse reports overdue HELD rows as EXPIRED without writing.
+        // The background worker persists the transition, so a read cannot race a
+        // concurrent confirmation and overwrite it.
         return holds.Select(MapToHoldResponse).ToList();
     }
 

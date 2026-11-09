@@ -28,7 +28,7 @@ services:
     restart: unless-stopped
     environment:
       ASPNETCORE_ENVIRONMENT: Production
-      ConnectionStrings__DefaultConnection: "Host=db;Port=5432;Database=${POSTGRES_DB:-school_admission};Username=${POSTGRES_USER:-myuser};Password=${POSTGRES_PASSWORD:-mysecretpassword};"
+      ConnectionStrings__DefaultConnection: "${CONNECTIONSTRINGS__DEFAULTCONNECTION:-Host=db;Port=5432;Database=${POSTGRES_DB:-school_admission};Username=${POSTGRES_USER:-myuser};Password=${POSTGRES_PASSWORD:-mysecretpassword};}"
       HOLD_DURATION_SECONDS: "${HOLD_DURATION_SECONDS:-600}"
     ports:
       - "8080:8080"
@@ -46,7 +46,7 @@ services:
     restart: unless-stopped
     environment:
       ASPNETCORE_ENVIRONMENT: Production
-      ConnectionStrings__DefaultConnection: "Host=db;Port=5432;Database=${POSTGRES_DB:-school_admission};Username=${POSTGRES_USER:-myuser};Password=${POSTGRES_PASSWORD:-mysecretpassword};"
+      ConnectionStrings__DefaultConnection: "${CONNECTIONSTRINGS__DEFAULTCONNECTION:-Host=db;Port=5432;Database=${POSTGRES_DB:-school_admission};Username=${POSTGRES_USER:-myuser};Password=${POSTGRES_PASSWORD:-mysecretpassword};}"
       HOLD_DURATION_SECONDS: "${HOLD_DURATION_SECONDS:-600}"
     ports:
       - "8081:8080"

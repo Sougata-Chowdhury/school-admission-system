@@ -56,6 +56,15 @@ and wording are my responsibility.
    an em dash and a multiplication sign (`â€”`, `Ã—`), caused by a mis-encoded
    edit on Windows. Found during the UI redesign. Fixed by rewriting the file in
    UTF-8 with ASCII text and inline SVG icons instead of special characters.
+9. **Numeric strings accepted for `totalSeats`.** ASP.NET Core's web JSON
+   defaults read numbers from strings, so `{"totalSeats":"2"}` returned `201`
+   even though the contract shows a JSON number. Found by fuzzing the API against
+   the contract. Fixed with `JsonNumberHandling.Strict` and a Postman regression
+   request that expects `400`.
+10. **NUL character caused a 500.** PostgreSQL text cannot contain `\u0000`, so a
+    class name with that character crashed the request. Found by fuzzing unusual
+    JSON strings. Fixed by rejecting NUL in the class name (and the student
+    header) with `400`, plus a Postman regression request.
 
 ## Verification performed
 
@@ -68,5 +77,8 @@ and wording are my responsibility.
   applications, capacity rejection and expiry rejection.
 - Browser check of the running UI, including the countdown and error banner.
 - The `postman/` collection was generated with the assistant, then run twice
-  against the live stack with the Postman CLI; both runs passed all 41 requests
-  and 56 assertions.
+  against the live stack with the Postman CLI; both runs passed all 43 requests
+  and 58 assertions.
+- Additional live audits covered response contracts, malformed input (no 5xx),
+  short hold expiry with the background worker, `down`/`up` persistence and
+  concurrent requests split across two backend processes.

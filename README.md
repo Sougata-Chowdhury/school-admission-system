@@ -77,13 +77,16 @@ environment variables (for example in a `.env` file next to
 | --- | --- | --- |
 | `HOLD_DURATION_SECONDS` | `600` | How long a seat is held before it is released. |
 | `VITE_API_BASE_URL` | `http://localhost:8080` | Backend URL written into the frontend's runtime config. |
+| `CONNECTIONSTRINGS__DEFAULTCONNECTION` | assembled from the `POSTGRES_*` values | Full backend connection string; overrides the assembled default. |
 | `POSTGRES_USER` | `myuser` | Database user. |
 | `POSTGRES_PASSWORD` | `mysecretpassword` | Database password. |
 | `POSTGRES_DB` | `school_admission` | Database name. |
 | `POSTGRES_PORT` | `5432` | Host port for PostgreSQL. |
 
 The backend receives its connection string through
-`ConnectionStrings__DefaultConnection` in `docker-compose.yml`.
+`ConnectionStrings__DefaultConnection`. By default Compose assembles it from the
+`POSTGRES_*` values; set `CONNECTIONSTRINGS__DEFAULTCONNECTION` itself to point at
+an external PostgreSQL server instead.
 
 Example with a short hold duration:
 
@@ -178,7 +181,7 @@ Open Postman, choose **Import**, and select both files. Pick the
 It creates its own timestamped classes, so it can be run repeatedly without
 resetting the database.
 
-The collection has 41 requests in six folders: health, admin classes, the full
+The collection has 43 requests in six folders: health, admin classes, the full
 parent flow, ownership checks, capacity/seat release, and invalid-input cases.
 It asserts status codes, response contracts, idempotent confirm/cancel, `403`
 for another student's application, `409` when a class is full, and that
@@ -191,7 +194,7 @@ postman collection run postman/School-Admission-System.postman_collection.json \
   -e postman/School-Admission-Local.postman_environment.json
 ```
 
-Expected summary: `41` requests, `56` assertions, `0` failures. Point the
+Expected summary: `43` requests, `58` assertions, `0` failures. Point the
 environment's `baseUrl` (or the collection variable) at another host if needed.
 The collection creates the students it uses in its own variables, so no manual
 setup is required.

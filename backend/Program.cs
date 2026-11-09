@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using SchoolAdmissionApi.Data;
 using SchoolAdmissionApi.Services;
@@ -21,7 +22,13 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 builder.Services.AddScoped<AdmissionService>();
 builder.Services.AddHostedService<HoldExpirationWorker>();
 
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        // The API contract uses JSON numbers for totalSeats. Do not silently
+        // accept numeric strings such as "2"; invalid input must be a 4xx.
+        options.JsonSerializerOptions.NumberHandling = JsonNumberHandling.Strict;
+    });
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();

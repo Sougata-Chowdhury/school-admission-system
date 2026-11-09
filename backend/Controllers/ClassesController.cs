@@ -25,6 +25,13 @@ public class ClassesController : ControllerBase
             return BadRequest(new { message = "Class name is required." });
         }
 
+        // PostgreSQL text cannot contain a NUL character. Treat it as invalid
+        // input (400) rather than letting the database raise a 500.
+        if (request.Name.Contains('\0'))
+        {
+            return BadRequest(new { message = "Class name contains an invalid character." });
+        }
+
         if (request.TotalSeats < 1)
         {
             return BadRequest(new { message = "totalSeats must be at least 1." });
