@@ -144,7 +144,10 @@ docker compose --profile test run --rm backend-tests
 ```
 
 This runs five tests, including a concurrency test that sends 20 simultaneous
-applications for 5 seats and asserts that exactly 5 succeed.
+applications for 5 seats and asserts that exactly 5 succeed. The suite creates
+its own `school_admission_test` database automatically (EF Core
+`EnsureCreated()`), so no manual `createdb` step is needed, even on a fresh
+volume.
 
 ### Backend (local .NET SDK)
 

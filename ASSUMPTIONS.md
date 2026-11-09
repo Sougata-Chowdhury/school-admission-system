@@ -60,6 +60,17 @@ The brief leaves some details open. These are the choices made, and why.
 
 ## Concurrency and consistency
 
+- **What "first-come, first-served" means here.** Requests are serialized by
+  PostgreSQL row-lock acquisition, not buffered into a strict chronological
+  queue. When several parents apply for the last seats at the same moment, the
+  database grants the `FOR UPDATE` lock to one transaction at a time and the
+  waiting transactions proceed in the order the database scheduler chooses. That
+  order is normally close to arrival order, but it is not a guaranteed
+  wall-clock FIFO order. The mandatory guarantees are still exact: no class is
+  oversold, exactly `totalSeats` applications can hold/confirm, every other
+  request receives `409`, and each accepted hold is persisted. We do not claim
+  millisecond-level arrival ordering; the concurrency test asserts the invariant
+  that matters (20 simultaneous requests for 5 seats produce exactly 5 holds).
 - **Capacity is enforced in PostgreSQL, not in process memory.** Creating a hold
   starts a transaction and takes a row lock on the class with
   `SELECT ... FOR UPDATE`. Every API process must acquire that lock before
@@ -109,3 +120,13 @@ The brief leaves some details open. These are the choices made, and why.
   the frontend port; the README documents it.
 - CORS is open for local/demo use because the frontend and backend run on
   different origins. No credentials or cookies are used.
+
+## Testing
+
+- **The test database is created automatically.** The Compose `backend-tests`
+  service connects as `school_admission_test`, which is not the database
+  PostgreSQL creates from `POSTGRES_DB`. EF Core's `EnsureCreated()` creates that
+  database on first use (connecting to the server's `postgres` maintenance
+  database), and each test starts from a clean schema via `EnsureDeleted()` /
+  `EnsureCreated()`. No manual `createdb` step is required. This was verified
+  from a fresh `docker compose down -v` volume.

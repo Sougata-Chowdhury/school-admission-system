@@ -7,6 +7,9 @@
 - **OpenCode AI coding assistant** for code review, debugging, test writing and
   documentation edits.
 
+No other AI tools (including ChatGPT) were used for planning, code, debugging or
+documentation. This list is complete.
+
 ## What AI was used for
 
 - ASP.NET Core controllers, EF Core entities/migrations and the React UI.
@@ -70,8 +73,9 @@ and wording are my responsibility.
 
 - `dotnet build` for the API and test project.
 - Backend tests (including the 20-request / 5-seat concurrency test) against
-  PostgreSQL.
-- `npm test` for the React component tests.
+  PostgreSQL, run from a fresh `docker compose down -v` volume to confirm the
+  `school_admission_test` database is created automatically.
+- `npm test` for the React component tests after a clean `npm ci`.
 - `docker compose up --build`, followed by real HTTP requests against the eight
   endpoints: create/list classes, hold, confirm twice, cancel, list a student's
   applications, capacity rejection and expiry rejection.
