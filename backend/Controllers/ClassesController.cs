@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using SchoolAdmissionApi.DTOs;
 using SchoolAdmissionApi.Services;
+using SchoolAdmissionApi.Support;
 
 namespace SchoolAdmissionApi.Controllers;
 
@@ -15,20 +16,25 @@ public class ClassesController : ControllerBase
         _admissionService = admissionService;
     }
 
-    // Endpoint 1: POST /classes (Admin creates class)
+    // POST /classes
     [HttpPost]
     public async Task<ActionResult<ClassResponse>> CreateClass([FromBody] CreateClassRequest request)
     {
-        if (!ModelState.IsValid)
+        if (string.IsNullOrWhiteSpace(request.Name))
         {
-            return BadRequest(ModelState);
+            return BadRequest(new { message = "Class name is required." });
+        }
+
+        if (request.TotalSeats < 1)
+        {
+            return BadRequest(new { message = "totalSeats must be at least 1." });
         }
 
         var result = await _admissionService.CreateClassAsync(request);
         return CreatedAtAction(nameof(GetClassById), new { classId = result.Id }, result);
     }
 
-    // Endpoint 2: GET /classes (Get all classes and seat counts)
+    // GET /classes
     [HttpGet]
     public async Task<ActionResult<List<ClassResponse>>> GetAllClasses()
     {
@@ -36,7 +42,7 @@ public class ClassesController : ControllerBase
         return Ok(result);
     }
 
-    // Endpoint 3: GET /classes/{classId} (Get one class)
+    // GET /classes/{classId}
     [HttpGet("{classId:guid}")]
     public async Task<ActionResult<ClassResponse>> GetClassById(Guid classId)
     {
@@ -45,26 +51,26 @@ public class ClassesController : ControllerBase
         {
             return NotFound(new { message = "Class not found." });
         }
+
         return Ok(result);
     }
 
-    // Endpoint 4: POST /classes/{classId}/holds (Reserve a seat)
+    // POST /classes/{classId}/holds
     [HttpPost("{classId:guid}/holds")]
-    public async Task<ActionResult<HoldResponse>> CreateHold(Guid classId)
+    public async Task<IActionResult> CreateHold(Guid classId)
     {
-        if (!Request.Headers.TryGetValue("X-Student-Id", out var studentIdValues) || string.IsNullOrWhiteSpace(studentIdValues.ToString()))
+        if (!StudentIdHeader.TryGet(Request, out var studentId, out var error))
         {
-            return BadRequest(new { message = "Missing required header: X-Student-Id" });
+            return error!;
         }
 
-        var studentId = studentIdValues.ToString().Trim();
-        var (hold, error, statusCode) = await _admissionService.CreateHoldAsync(classId, studentId);
+        var (hold, message, statusCode) = await _admissionService.CreateHoldAsync(classId, studentId);
 
-        if (error != null)
+        if (message != null)
         {
-            return StatusCode(statusCode, new { message = error });
+            return StatusCode(statusCode, new { message });
         }
 
-        return CreatedAtAction(nameof(HoldsController.GetHoldById), "Holds", new { holdId = hold!.HoldId }, hold);
+        return Created($"/holds/{hold!.HoldId}", hold);
     }
 }

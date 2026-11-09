@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using SchoolAdmissionApi.DTOs;
 using SchoolAdmissionApi.Services;
+using SchoolAdmissionApi.Support;
 
 namespace SchoolAdmissionApi.Controllers;
 
@@ -14,68 +15,66 @@ public class HoldsController : ControllerBase
         _admissionService = admissionService;
     }
 
-    // Endpoint 5: GET /holds/{holdId} (Get reservation details)
+    // GET /holds/{holdId}
     [HttpGet("holds/{holdId:guid}")]
     public async Task<ActionResult<HoldResponse>> GetHoldById(Guid holdId)
     {
-        var (hold, error, statusCode) = await _admissionService.GetHoldByIdAsync(holdId);
-        if (error != null)
+        var (hold, message, statusCode) = await _admissionService.GetHoldByIdAsync(holdId);
+        if (message != null)
         {
-            return StatusCode(statusCode, new { message = error });
+            return StatusCode(statusCode, new { message });
         }
+
         return Ok(hold);
     }
 
-    // Endpoint 6: POST /holds/{holdId}/confirm (Confirm admission)
+    // POST /holds/{holdId}/confirm
     [HttpPost("holds/{holdId:guid}/confirm")]
-    public async Task<ActionResult<HoldResponse>> ConfirmHold(Guid holdId)
+    public async Task<IActionResult> ConfirmHold(Guid holdId)
     {
-        if (!Request.Headers.TryGetValue("X-Student-Id", out var studentIdValues) || string.IsNullOrWhiteSpace(studentIdValues.ToString()))
+        if (!StudentIdHeader.TryGet(Request, out var studentId, out var error))
         {
-            return BadRequest(new { message = "Missing required header: X-Student-Id" });
+            return error!;
         }
 
-        var studentId = studentIdValues.ToString().Trim();
-        var (hold, error, statusCode) = await _admissionService.ConfirmHoldAsync(holdId, studentId);
+        var (hold, message, statusCode) = await _admissionService.ConfirmHoldAsync(holdId, studentId);
 
-        if (error != null)
+        if (message != null)
         {
-            return StatusCode(statusCode, new { message = error });
+            return StatusCode(statusCode, new { message });
         }
 
         return Ok(hold);
     }
 
-    // Endpoint 7: DELETE /holds/{holdId} (Cancel reservation - Returns 204 No Content per spec)
+    // DELETE /holds/{holdId}
     [HttpDelete("holds/{holdId:guid}")]
     public async Task<IActionResult> CancelHold(Guid holdId)
     {
-        if (!Request.Headers.TryGetValue("X-Student-Id", out var studentIdValues) || string.IsNullOrWhiteSpace(studentIdValues.ToString()))
+        if (!StudentIdHeader.TryGet(Request, out var studentId, out var error))
         {
-            return BadRequest(new { message = "Missing required header: X-Student-Id" });
+            return error!;
         }
 
-        var studentId = studentIdValues.ToString().Trim();
-        var (hold, error, statusCode) = await _admissionService.CancelHoldAsync(holdId, studentId);
+        var (_, message, statusCode) = await _admissionService.CancelHoldAsync(holdId, studentId);
 
-        if (error != null)
+        if (message != null)
         {
-            return StatusCode(statusCode, new { message = error });
+            return StatusCode(statusCode, new { message });
         }
 
         return NoContent();
     }
 
-    // Endpoint 8: GET /me/holds (Get student's applications)
+    // GET /me/holds
     [HttpGet("me/holds")]
-    public async Task<ActionResult<List<HoldResponse>>> GetMyHolds()
+    public async Task<IActionResult> GetMyHolds()
     {
-        if (!Request.Headers.TryGetValue("X-Student-Id", out var studentIdValues) || string.IsNullOrWhiteSpace(studentIdValues.ToString()))
+        if (!StudentIdHeader.TryGet(Request, out var studentId, out var error))
         {
-            return BadRequest(new { message = "Missing required header: X-Student-Id" });
+            return error!;
         }
 
-        var studentId = studentIdValues.ToString().Trim();
         var holds = await _admissionService.GetStudentHoldsAsync(studentId);
         return Ok(holds);
     }

@@ -4,7 +4,7 @@ using SchoolAdmissionApi.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. Configure CORS
+// Allow the React app (served from a different port/origin) to call the API.
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", policy =>
@@ -15,19 +15,22 @@ builder.Services.AddCors(options =>
     });
 });
 
-// 2. Add DbContext with PostgreSQL
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-// 3. Register Application Services
 builder.Services.AddScoped<AdmissionService>();
 builder.Services.AddHostedService<HoldExpirationWorker>();
 
 builder.Services.AddControllers();
+builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
+
+// A fresh database (for example after `docker compose down -v`) has no tables.
+// Apply migrations before accepting traffic, retrying while PostgreSQL starts up.
+await ApplyMigrationsAsync(app);
 
 if (app.Environment.IsDevelopment())
 {
@@ -35,8 +38,42 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+app.UseExceptionHandler();
 app.UseCors("AllowAll");
-app.UseAuthorization();
+
+app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapControllers();
 
 app.Run();
+
+static async Task ApplyMigrationsAsync(WebApplication app)
+{
+    using var scope = app.Services.CreateScope();
+    var logger = scope.ServiceProvider
+        .GetRequiredService<ILoggerFactory>()
+        .CreateLogger("Startup");
+    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+    const int maxAttempts = 10;
+    for (var attempt = 1; attempt <= maxAttempts; attempt++)
+    {
+        try
+        {
+            await dbContext.Database.MigrateAsync();
+            logger.LogInformation("Database migrations are up to date.");
+            return;
+        }
+        catch (Exception ex) when (attempt < maxAttempts)
+        {
+            logger.LogWarning(
+                ex,
+                "Database is not ready (attempt {Attempt}/{MaxAttempts}). Retrying in 3 seconds.",
+                attempt,
+                maxAttempts);
+            await Task.Delay(TimeSpan.FromSeconds(3));
+        }
+    }
+
+    // Final attempt: let the exception surface and fail the container.
+    await dbContext.Database.MigrateAsync();
+}
