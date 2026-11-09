@@ -1,0 +1,25 @@
+# Build output
+**/bin/
+**/obj/
+**/dist/
+**/dist-ssr/
+
+# Dependencies
+**/node_modules/
+
+# Local configuration
+.env
+.env.*
+!.env.example
+*.user
+appsettings.Local.json
+
+# Editor/OS files
+.vs/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
