@@ -51,6 +51,10 @@ and wording are my responsibility.
    `localhost` and provided no Docker path. Found while documenting test
    instructions. Fixed with a `TEST_DB_CONNECTION` override and a
    `backend-tests` Compose profile.
+8. **Corrupted UI strings.** Reading the generated `App.jsx` showed mojibake for
+   an em dash and a multiplication sign (`â€”`, `Ã—`), caused by a mis-encoded
+   edit on Windows. Found during the UI redesign. Fixed by rewriting the file in
+   UTF-8 with ASCII text and inline SVG icons instead of special characters.
 
 ## Verification performed
 

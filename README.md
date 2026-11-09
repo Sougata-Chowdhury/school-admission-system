@@ -43,21 +43,29 @@ docker compose down -v
 
 ## Using the UI
 
-No login is required.
+No login is required. The app has two clearly separate surfaces, switched from
+the header: a **Parent Portal** for families and an **Administrator console**
+for the school. They use different layouts and colours so it is always obvious
+which role is on screen; both are part of the same React app.
 
-1. In **Parent Portal**, enter a birth registration number and click **Set
-   Student ID**. It is remembered in `localStorage`, so reopening the browser
-   restores the student's applications.
-2. In **School Admin**, create a class such as `Class 6 - Morning Shift` with a
-   seat count. Each class/shift is a separate class.
-3. In **Parent Portal**, click **Apply** on a class. The application shows its
-   status and a live countdown.
+1. The app opens on the **Parent Portal**. At the top of the page, enter a birth
+   registration number and click **Set Student ID**. It is remembered in
+   `localStorage`, so reopening the browser restores the student's applications.
+2. Switch to **School Admin** to open the administrator console. It shows live
+   totals (classes, seats, held, confirmed, available), a **Create Class** form,
+   and the **Class List** table. Create a class such as
+   `Class 6 - Morning Shift` with a seat count. Each class/shift is a separate
+   class.
+3. Back in **Parent Portal**, click **Apply** on a class. The application appears
+   under **My Applications** with its status, a live countdown and a progress
+   bar.
 4. Click **Pay Admission Fee** before the countdown reaches zero to confirm the
    admission, or **Cancel** to release the seat.
 
 Seat counts refresh every 2 seconds and applications every 3 seconds. An
-expired hold becomes `EXPIRED` in the UI without a page reload, and the payment
-button is disabled.
+expired hold becomes `EXPIRED` in the UI without a page reload, the payment
+button is disabled, and the seat returns to the class automatically. Errors
+from the API are shown in a dismissible banner in plain language.
 
 ## Configuration
 
@@ -152,6 +160,10 @@ cd frontend
 npm ci
 npm test
 ```
+
+The suite covers identity persistence, admin class creation, applying with the
+student header, a held application with its countdown, client-side expiry,
+the separate administrator console, and the visible network-error banner.
 
 ## Bonus: multiple backend processes on one database
 

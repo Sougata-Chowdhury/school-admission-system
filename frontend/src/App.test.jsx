@@ -130,4 +130,94 @@ describe('School Admission Portal UI', () => {
       /cannot reach the server/i,
     );
   });
+
+  it('shows a separate administrator console without the parent identity form', async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /school admin/i }));
+
+    expect(
+      screen.getByRole('heading', { name: /admissions overview/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: /create class/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('table')).toBeInTheDocument();
+    expect(
+      screen.queryByLabelText(/birth registration number/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it('renders a held application with countdown and enabled payment actions', async () => {
+    window.localStorage.setItem('studentId', '20152691234567890');
+
+    const createdAt = new Date(Date.now() - 60 * 1000).toISOString();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+
+    axios.get.mockImplementation((url) => {
+      if (url.endsWith('/me/holds')) {
+        return Promise.resolve({
+          data: [
+            {
+              holdId: 'h_held',
+              classId: 'c_held',
+              className: 'Class 6 - Morning Shift',
+              status: 'HELD',
+              expiresAt,
+              createdAt,
+              confirmedAt: null,
+            },
+          ],
+        });
+      }
+      return Promise.resolve(emptyList);
+    });
+
+    render(<App />);
+
+    expect(
+      await screen.findByText(/class 6 - morning shift/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/time remaining/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /pay admission fee/i }),
+    ).toBeEnabled();
+    expect(screen.getByRole('button', { name: /^cancel$/i })).toBeEnabled();
+  });
+
+  it('marks a timed-out hold as EXPIRED and disables payment without a reload', async () => {
+    window.localStorage.setItem('studentId', '20152691234567890');
+
+    const createdAt = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+    const expiresAt = new Date(Date.now() - 60 * 1000).toISOString();
+
+    axios.get.mockImplementation((url) => {
+      if (url.endsWith('/me/holds')) {
+        return Promise.resolve({
+          data: [
+            {
+              holdId: 'h_expired',
+              classId: 'c_expired',
+              className: 'Class 7 - Day Shift',
+              status: 'HELD',
+              expiresAt,
+              createdAt,
+              confirmedAt: null,
+            },
+          ],
+        });
+      }
+      return Promise.resolve(emptyList);
+    });
+
+    render(<App />);
+
+    const payButton = await screen.findByRole('button', {
+      name: /pay admission fee/i,
+    });
+
+    expect(payButton).toBeDisabled();
+    expect(screen.getAllByText('EXPIRED').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/time remaining/i)).not.toBeInTheDocument();
+  });
 });

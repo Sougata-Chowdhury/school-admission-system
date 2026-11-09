@@ -77,6 +77,13 @@ The brief leaves some details open. These are the choices made, and why.
 
 ## Frontend behaviour
 
+- **Two distinct surfaces, one app.** The Parent Portal and the Administrator
+  console are separate screens with different layouts and colour schemes, chosen
+  from a header switch. This makes the role obvious without introducing login:
+  the brief explicitly says no login is required. The birth registration box
+  sits at the top of the Parent Portal, as required. The admin console does not
+  need a student identity and therefore does not show the box; both roles remain
+  reachable at any time from the same header switch.
 - **Runtime API URL.** The nginx entrypoint writes `VITE_API_BASE_URL` into
   `/config.js` when the container starts. The Vite development server falls back
   to its own environment variable or `http://localhost:8080`.
