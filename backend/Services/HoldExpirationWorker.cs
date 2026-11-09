@@ -3,12 +3,21 @@ using SchoolAdmissionApi.Data;
 
 namespace SchoolAdmissionApi.Services;
 
+/// <summary>
+/// Periodically marks timed-out holds as EXPIRED so the database stays tidy.
+/// Read endpoints also treat an expired HELD row as EXPIRED on the fly, so a
+/// seat is never blocked while waiting for this worker.
+/// </summary>
 public class HoldExpirationWorker : BackgroundService
 {
+    private static readonly TimeSpan SweepInterval = TimeSpan.FromSeconds(5);
+
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<HoldExpirationWorker> _logger;
 
-    public HoldExpirationWorker(IServiceProvider serviceProvider, ILogger<HoldExpirationWorker> logger)
+    public HoldExpirationWorker(
+        IServiceProvider serviceProvider,
+        ILogger<HoldExpirationWorker> logger)
     {
         _serviceProvider = serviceProvider;
         _logger = logger;
@@ -24,26 +33,34 @@ public class HoldExpirationWorker : BackgroundService
                 var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
                 var now = DateTime.UtcNow;
-                var expiredHolds = await dbContext.Holds
+                var expiredCount = await dbContext.Holds
                     .Where(h => h.Status == "HELD" && h.ExpiresAt <= now)
-                    .ToListAsync(stoppingToken);
+                    .ExecuteUpdateAsync(
+                        setters => setters.SetProperty(h => h.Status, "EXPIRED"),
+                        stoppingToken);
 
-                if (expiredHolds.Count > 0)
+                if (expiredCount > 0)
                 {
-                    foreach (var hold in expiredHolds)
-                    {
-                        hold.Status = "EXPIRED";
-                    }
-                    await dbContext.SaveChangesAsync(stoppingToken);
-                    _logger.LogInformation("Expired {Count} admission holds.", expiredHolds.Count);
+                    _logger.LogInformation("Expired {Count} admission holds.", expiredCount);
                 }
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error while processing expired admission holds.");
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+            try
+            {
+                await Task.Delay(SweepInterval, stoppingToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
         }
     }
 }

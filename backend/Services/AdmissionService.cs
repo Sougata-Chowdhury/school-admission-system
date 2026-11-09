@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using SchoolAdmissionApi.Data;
 using SchoolAdmissionApi.DTOs;
 using SchoolAdmissionApi.Models;
@@ -7,6 +8,11 @@ namespace SchoolAdmissionApi.Services;
 
 public class AdmissionService
 {
+    private const string HeldStatus = "HELD";
+    private const string ConfirmedStatus = "CONFIRMED";
+    private const string ExpiredStatus = "EXPIRED";
+    private const string CancelledStatus = "CANCELLED";
+
     private readonly AppDbContext _dbContext;
     private readonly IConfiguration _configuration;
 
@@ -18,12 +24,16 @@ public class AdmissionService
 
     private int GetHoldDurationSeconds()
     {
-        var envVal = Environment.GetEnvironmentVariable("HOLD_DURATION_SECONDS");
-        if (!string.IsNullOrEmpty(envVal) && int.TryParse(envVal, out var parsed))
+        var envValue = Environment.GetEnvironmentVariable("HOLD_DURATION_SECONDS");
+        if (!string.IsNullOrWhiteSpace(envValue) &&
+            int.TryParse(envValue, out var parsed) &&
+            parsed > 0)
         {
             return parsed;
         }
-        return _configuration.GetValue<int>("HOLD_DURATION_SECONDS", 600);
+
+        var configured = _configuration.GetValue<int?>("HOLD_DURATION_SECONDS") ?? 600;
+        return configured > 0 ? configured : 600;
     }
 
     public async Task<ClassResponse?> GetClassByIdAsync(Guid classId)
@@ -32,9 +42,7 @@ public class AdmissionService
             .Include(c => c.Holds)
             .FirstOrDefaultAsync(c => c.Id == classId);
 
-        if (schoolClass == null) return null;
-
-        return MapToClassResponse(schoolClass);
+        return schoolClass == null ? null : MapToClassResponse(schoolClass);
     }
 
     public async Task<List<ClassResponse>> GetAllClassesAsync()
@@ -51,7 +59,7 @@ public class AdmissionService
     {
         var schoolClass = new SchoolClass
         {
-            Name = request.Name,
+            Name = request.Name.Trim(),
             TotalSeats = request.TotalSeats
         };
 
@@ -61,14 +69,23 @@ public class AdmissionService
         return MapToClassResponse(schoolClass);
     }
 
-    public async Task<(HoldResponse? Hold, string? Error, int StatusCode)> CreateHoldAsync(Guid classId, string studentId)
+    public async Task<(HoldResponse? Hold, string? Error, int StatusCode)> CreateHoldAsync(
+        Guid classId,
+        string studentId)
     {
-        using var transaction = await _dbContext.Database.BeginTransactionAsync();
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync();
         try
         {
-            var schoolClass = await _dbContext.Classes
-                .FromSqlInterpolated($"SELECT * FROM \"Classes\" WHERE \"Id\" = {classId} FOR UPDATE")
-                .FirstOrDefaultAsync();
+            // Lock the class row for the whole transaction. Every process using this
+            // database must acquire the same lock before checking/inserting holds, so
+            // held + confirmed can never exceed totalSeats even with multiple API processes.
+            //
+            // ToListAsync is intentional: composing FirstOrDefaultAsync on a query that
+            // already ends in "FOR UPDATE" can append LIMIT after FOR UPDATE (invalid SQL).
+            var schoolClass = (await _dbContext.Classes
+                    .FromSqlInterpolated($"SELECT * FROM \"Classes\" WHERE \"Id\" = {classId} FOR UPDATE")
+                    .ToListAsync())
+                .FirstOrDefault();
 
             if (schoolClass == null)
             {
@@ -77,34 +94,48 @@ public class AdmissionService
 
             var now = DateTime.UtcNow;
 
-            var existingActiveHold = await _dbContext.Holds
-                .AnyAsync(h => h.ClassId == classId && 
-                               h.StudentId == studentId && 
-                               (h.Status == "CONFIRMED" || (h.Status == "HELD" && h.ExpiresAt > now)));
+            // Expired holds do not reserve a seat. Also move them to EXPIRED now so the
+            // partial unique index does not block this student from applying again.
+            await _dbContext.Holds
+                .Where(h => h.ClassId == classId &&
+                            h.Status == HeldStatus &&
+                            h.ExpiresAt <= now)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(h => h.Status, ExpiredStatus));
 
-            if (existingActiveHold)
+            var hasActiveApplication = await _dbContext.Holds
+                .AnyAsync(h => h.ClassId == classId &&
+                               h.StudentId == studentId &&
+                               (h.Status == ConfirmedStatus ||
+                                (h.Status == HeldStatus && h.ExpiresAt > now)));
+
+            if (hasActiveApplication)
             {
-                return (null, "Student already has an active reservation or confirmed seat for this class.", 409);
+                return (null,
+                    "You already have an active application or confirmed admission for this class.",
+                    409);
             }
 
-            var activeHeldCount = await _dbContext.Holds
-                .CountAsync(h => h.ClassId == classId && h.Status == "HELD" && h.ExpiresAt > now);
+            var heldSeats = await _dbContext.Holds
+                .CountAsync(h => h.ClassId == classId &&
+                                 h.Status == HeldStatus &&
+                                 h.ExpiresAt > now);
 
-            var confirmedCount = await _dbContext.Holds
-                .CountAsync(h => h.ClassId == classId && h.Status == "CONFIRMED");
+            var confirmedSeats = await _dbContext.Holds
+                .CountAsync(h => h.ClassId == classId &&
+                                 h.Status == ConfirmedStatus);
 
-            if (activeHeldCount + confirmedCount >= schoolClass.TotalSeats)
+            if (heldSeats + confirmedSeats >= schoolClass.TotalSeats)
             {
-                return (null, "No seats available for this class.", 409);
+                return (null, "No seats are available for this class.", 409);
             }
 
-            var durationSeconds = GetHoldDurationSeconds();
             var hold = new AdmissionHold
             {
                 ClassId = classId,
                 StudentId = studentId,
-                Status = "HELD",
-                ExpiresAt = now.AddSeconds(durationSeconds),
+                Status = HeldStatus,
+                ExpiresAt = now.AddSeconds(GetHoldDurationSeconds()),
                 CreatedAt = now
             };
 
@@ -115,7 +146,14 @@ public class AdmissionService
             hold.Class = schoolClass;
             return (MapToHoldResponse(hold), null, 201);
         }
-        catch (Exception)
+        catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+        {
+            await transaction.RollbackAsync();
+            return (null,
+                "You already have an active application or confirmed admission for this class.",
+                409);
+        }
+        catch
         {
             await transaction.RollbackAsync();
             throw;
@@ -128,55 +166,75 @@ public class AdmissionService
             .Include(h => h.Class)
             .FirstOrDefaultAsync(h => h.Id == holdId);
 
-        if (hold == null) return (null, "Reservation not found.", 404);
-
-        if (hold.Status == "HELD" && hold.ExpiresAt <= DateTime.UtcNow)
+        if (hold == null)
         {
-            hold.Status = "EXPIRED";
+            return (null, "Application not found.", 404);
+        }
+
+        if (hold.Status == HeldStatus && hold.ExpiresAt <= DateTime.UtcNow)
+        {
+            hold.Status = ExpiredStatus;
             await _dbContext.SaveChangesAsync();
         }
 
         return (MapToHoldResponse(hold), null, 200);
     }
 
-    public async Task<(HoldResponse? Hold, string? Error, int StatusCode)> ConfirmHoldAsync(Guid holdId, string studentId)
+    public async Task<(HoldResponse? Hold, string? Error, int StatusCode)> ConfirmHoldAsync(
+        Guid holdId,
+        string studentId)
     {
-        using var transaction = await _dbContext.Database.BeginTransactionAsync();
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync();
         try
         {
-            var hold = await _dbContext.Holds
-                .FromSqlInterpolated($"SELECT * FROM \"Holds\" WHERE \"Id\" = {holdId} FOR UPDATE")
-                .Include(h => h.Class)
-                .FirstOrDefaultAsync();
+            // Lock the application row so confirm/cancel/expiry cannot race each other.
+            // ToListAsync keeps the exact "FOR UPDATE" query; see CreateHoldAsync.
+            var hold = (await _dbContext.Holds
+                    .FromSqlInterpolated($"SELECT * FROM \"Holds\" WHERE \"Id\" = {holdId} FOR UPDATE")
+                    .ToListAsync())
+                .FirstOrDefault();
 
-            if (hold == null) return (null, "Reservation not found.", 404);
-
-            if (hold.StudentId != studentId)
+            if (hold == null)
             {
-                return (null, "Student ID mismatch.", 403);
+                return (null, "Application not found.", 404);
             }
 
-            if (hold.Status == "CONFIRMED")
+            hold.Class = await _dbContext.Classes
+                .FirstOrDefaultAsync(c => c.Id == hold.ClassId) ?? hold.Class;
+
+            if (!string.Equals(hold.StudentId, studentId, StringComparison.Ordinal))
             {
+                return (null, "This application belongs to a different student.", 403);
+            }
+
+            if (hold.Status == ConfirmedStatus)
+            {
+                // Idempotent: repeated payment confirmation must not add another seat.
                 await transaction.CommitAsync();
                 return (MapToHoldResponse(hold), null, 200);
             }
 
-            var now = DateTime.UtcNow;
-            if (hold.Status == "EXPIRED" || (hold.Status == "HELD" && hold.ExpiresAt <= now))
+            if (hold.Status == CancelledStatus)
             {
-                hold.Status = "EXPIRED";
+                return (null, "This application was cancelled and cannot be confirmed.", 409);
+            }
+
+            var now = DateTime.UtcNow;
+            if (hold.Status == ExpiredStatus ||
+                (hold.Status == HeldStatus && hold.ExpiresAt <= now))
+            {
+                hold.Status = ExpiredStatus;
                 await _dbContext.SaveChangesAsync();
                 await transaction.CommitAsync();
-                return (null, "Reservation has expired and cannot be confirmed.", 409);
+                return (null, "This application has expired and cannot be confirmed.", 409);
             }
 
-            if (hold.Status == "CANCELLED")
+            if (hold.Status != HeldStatus)
             {
-                return (null, "Reservation was cancelled.", 409);
+                return (null, "This application cannot be confirmed in its current state.", 409);
             }
 
-            hold.Status = "CONFIRMED";
+            hold.Status = ConfirmedStatus;
             hold.ConfirmedAt = now;
 
             await _dbContext.SaveChangesAsync();
@@ -184,35 +242,78 @@ public class AdmissionService
 
             return (MapToHoldResponse(hold), null, 200);
         }
-        catch (Exception)
+        catch
         {
             await transaction.RollbackAsync();
             throw;
         }
     }
 
-    public async Task<(HoldResponse? Hold, string? Error, int StatusCode)> CancelHoldAsync(Guid holdId, string studentId)
+    public async Task<(HoldResponse? Hold, string? Error, int StatusCode)> CancelHoldAsync(
+        Guid holdId,
+        string studentId)
     {
-        var hold = await _dbContext.Holds
-            .Include(h => h.Class)
-            .FirstOrDefaultAsync(h => h.Id == holdId);
-
-        if (hold == null) return (null, "Reservation not found.", 404);
-
-        if (hold.StudentId != studentId)
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync();
+        try
         {
-            return (null, "Student ID mismatch.", 403);
-        }
+            var hold = (await _dbContext.Holds
+                    .FromSqlInterpolated($"SELECT * FROM \"Holds\" WHERE \"Id\" = {holdId} FOR UPDATE")
+                    .ToListAsync())
+                .FirstOrDefault();
 
-        if (hold.Status == "CONFIRMED")
+            if (hold == null)
+            {
+                return (null, "Application not found.", 404);
+            }
+
+            hold.Class = await _dbContext.Classes
+                .FirstOrDefaultAsync(c => c.Id == hold.ClassId) ?? hold.Class;
+
+            if (!string.Equals(hold.StudentId, studentId, StringComparison.Ordinal))
+            {
+                return (null, "This application belongs to a different student.", 403);
+            }
+
+            if (hold.Status == ConfirmedStatus)
+            {
+                return (null, "A confirmed admission cannot be cancelled.", 409);
+            }
+
+            if (hold.Status == CancelledStatus)
+            {
+                // DELETE is idempotent.
+                await transaction.CommitAsync();
+                return (MapToHoldResponse(hold), null, 204);
+            }
+
+            if (hold.Status == ExpiredStatus ||
+                (hold.Status == HeldStatus && hold.ExpiresAt <= DateTime.UtcNow))
+            {
+                if (hold.Status != ExpiredStatus)
+                {
+                    hold.Status = ExpiredStatus;
+                    await _dbContext.SaveChangesAsync();
+                    await transaction.CommitAsync();
+                }
+                else
+                {
+                    await transaction.CommitAsync();
+                }
+
+                return (null, "This application has already expired.", 409);
+            }
+
+            hold.Status = CancelledStatus;
+            await _dbContext.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            return (MapToHoldResponse(hold), null, 204);
+        }
+        catch
         {
-            return (null, "Cannot cancel a confirmed admission.", 400);
+            await transaction.RollbackAsync();
+            throw;
         }
-
-        hold.Status = "CANCELLED";
-        await _dbContext.SaveChangesAsync();
-
-        return (MapToHoldResponse(hold), null, 200);
     }
 
     public async Task<List<HoldResponse>> GetStudentHoldsAsync(string studentId)
@@ -224,17 +325,14 @@ public class AdmissionService
             .OrderByDescending(h => h.CreatedAt)
             .ToListAsync();
 
-        var modified = false;
-        foreach (var hold in holds)
+        var changed = false;
+        foreach (var hold in holds.Where(h => h.Status == HeldStatus && h.ExpiresAt <= now))
         {
-            if (hold.Status == "HELD" && hold.ExpiresAt <= now)
-            {
-                hold.Status = "EXPIRED";
-                modified = true;
-            }
+            hold.Status = ExpiredStatus;
+            changed = true;
         }
 
-        if (modified)
+        if (changed)
         {
             await _dbContext.SaveChangesAsync();
         }
@@ -242,43 +340,57 @@ public class AdmissionService
         return holds.Select(MapToHoldResponse).ToList();
     }
 
-    private static ClassResponse MapToClassResponse(SchoolClass c)
+    private static ClassResponse MapToClassResponse(SchoolClass schoolClass)
     {
         var now = DateTime.UtcNow;
-        var heldSeats = c.Holds.Count(h => h.Status == "HELD" && h.ExpiresAt > now);
-        var confirmedSeats = c.Holds.Count(h => h.Status == "CONFIRMED");
-        var availableSeats = Math.Max(0, c.TotalSeats - (heldSeats + confirmedSeats));
+        var heldSeats = schoolClass.Holds.Count(h => h.Status == HeldStatus && h.ExpiresAt > now);
+        var confirmedSeats = schoolClass.Holds.Count(h => h.Status == ConfirmedStatus);
 
         return new ClassResponse
         {
-            Id = c.Id,
-            Name = c.Name,
-            TotalSeats = c.TotalSeats,
+            Id = schoolClass.Id,
+            Name = schoolClass.Name,
+            TotalSeats = schoolClass.TotalSeats,
             HeldSeats = heldSeats,
             ConfirmedSeats = confirmedSeats,
-            AvailableSeats = availableSeats,
-            CreatedAt = c.CreatedAt
+            AvailableSeats = Math.Max(0, schoolClass.TotalSeats - (heldSeats + confirmedSeats)),
+            CreatedAt = schoolClass.CreatedAt
         };
     }
 
-    private static HoldResponse MapToHoldResponse(AdmissionHold h)
+    private static HoldResponse MapToHoldResponse(AdmissionHold hold)
     {
-        var status = h.Status;
-        if (status == "HELD" && h.ExpiresAt <= DateTime.UtcNow)
+        var status = hold.Status;
+        if (status == HeldStatus && hold.ExpiresAt <= DateTime.UtcNow)
         {
-            status = "EXPIRED";
+            status = ExpiredStatus;
         }
 
         return new HoldResponse
         {
-            HoldId = h.Id,
-            ClassId = h.ClassId,
-            ClassName = h.Class?.Name ?? string.Empty,
-            StudentId = h.StudentId,
+            HoldId = hold.Id,
+            ClassId = hold.ClassId,
+            ClassName = hold.Class?.Name ?? string.Empty,
+            StudentId = hold.StudentId,
             Status = status,
-            ExpiresAt = h.ExpiresAt,
-            CreatedAt = h.CreatedAt,
-            ConfirmedAt = h.ConfirmedAt
+            ExpiresAt = hold.ExpiresAt,
+            CreatedAt = hold.CreatedAt,
+            ConfirmedAt = hold.ConfirmedAt
         };
+    }
+
+    private static bool IsUniqueViolation(Exception? exception)
+    {
+        while (exception != null)
+        {
+            if (exception is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+            {
+                return true;
+            }
+
+            exception = exception.InnerException;
+        }
+
+        return false;
     }
 }
