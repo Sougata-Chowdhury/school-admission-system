@@ -165,6 +165,37 @@ The suite covers identity persistence, admin class creation, applying with the
 student header, a held application with its countdown, client-side expiry,
 the separate administrator console, and the visible network-error banner.
 
+### API collection in Postman
+
+`postman/` contains an importable collection that exercises all eight endpoints
+and the concurrency-related rules:
+
+- `School-Admission-System.postman_collection.json`
+- `School-Admission-Local.postman_environment.json`
+
+Open Postman, choose **Import**, and select both files. Pick the
+**School Admission - Local** environment, start the stack, and run the collection.
+It creates its own timestamped classes, so it can be run repeatedly without
+resetting the database.
+
+The collection has 41 requests in six folders: health, admin classes, the full
+parent flow, ownership checks, capacity/seat release, and invalid-input cases.
+It asserts status codes, response contracts, idempotent confirm/cancel, `403`
+for another student's application, `409` when a class is full, and that
+`heldSeats + confirmedSeats` never exceeds `totalSeats`.
+
+Run it headlessly with the Postman CLI:
+
+```bash
+postman collection run postman/School-Admission-System.postman_collection.json \
+  -e postman/School-Admission-Local.postman_environment.json
+```
+
+Expected summary: `41` requests, `56` assertions, `0` failures. Point the
+environment's `baseUrl` (or the collection variable) at another host if needed.
+The collection creates the students it uses in its own variables, so no manual
+setup is required.
+
 ## Bonus: multiple backend processes on one database
 
 The capacity check uses a PostgreSQL row lock (`SELECT ... FOR UPDATE`) inside a
@@ -186,6 +217,7 @@ the locking details.
 ```
 backend/                 ASP.NET Core API, EF Core models/services/migrations
 frontend/                React + Vite application and Vitest tests
+postman/                 Importable API collection and local environment
 tests/                   xUnit integration/unit tests and test Dockerfile
 docker-compose.yml       PostgreSQL + backend + frontend (+ optional services)
 ASSUMPTIONS.md           Decisions made where the brief was open

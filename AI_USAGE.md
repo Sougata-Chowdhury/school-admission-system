@@ -12,6 +12,7 @@
 - ASP.NET Core controllers, EF Core entities/migrations and the React UI.
 - The concurrency approach (`SELECT ... FOR UPDATE` on the class row).
 - Drafting the xUnit concurrency test and the Vitest component tests.
+- Drafting the Postman collection and environment under `postman/`.
 - Drafting README/ASSUMPTIONS content.
 
 All generated code was reviewed, built and exercised locally; the final choices
@@ -66,3 +67,6 @@ and wording are my responsibility.
   endpoints: create/list classes, hold, confirm twice, cancel, list a student's
   applications, capacity rejection and expiry rejection.
 - Browser check of the running UI, including the countdown and error banner.
+- The `postman/` collection was generated with the assistant, then run twice
+  against the live stack with the Postman CLI; both runs passed all 41 requests
+  and 56 assertions.

@@ -1,0 +1,1367 @@
+{
+  "info": {
+    "_postman_id": "9f2f4f9e-2b1a-4a7a-9b1c-5d6e7f8091a2",
+    "name": "School Admission System",
+    "description": "End-to-end API checks for the FCFS school admission system. Run against the Docker stack at http://localhost:8080. The collection creates its own timestamped classes, so it can be run repeatedly.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "00 - Health",
+      "item": [
+        {
+          "name": "00 - Health check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('health payload is ok', () => pm.expect(body.status).to.eql('ok'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/health"
+          }
+        }
+      ]
+    },
+    {
+      "name": "01 - Admin: classes",
+      "item": [
+        {
+          "name": "01 - Create class (2 seats)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('className', 'Postman Class ' + Date.now());",
+                  "pm.collectionVariables.set('capacityClassName', 'Postman Capacity ' + Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.test('response contains required fields', () => {",
+                  "  pm.expect(body.id).to.be.a('string');",
+                  "  pm.expect(body.id.length).to.be.above(0);",
+                  "  pm.expect(body.name).to.eql(pm.variables.get('className'));",
+                  "  pm.expect(body.totalSeats).to.eql(2);",
+                  "});",
+                  "pm.collectionVariables.set('classId', body.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/classes",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{className}}\",\n  \"totalSeats\": 2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "02 - List classes",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const id = pm.variables.get('classId');",
+                  "const found = body.find((c) => c.id === id);",
+                  "pm.test('created class is listed', () => pm.expect(found).to.be.an('object'));",
+                  "pm.test('seat count fields are present', () => {",
+                  "  pm.expect(found.totalSeats).to.eql(2);",
+                  "  pm.expect(found.heldSeats).to.eql(0);",
+                  "  pm.expect(found.confirmedSeats).to.eql(0);",
+                  "  pm.expect(found.availableSeats).to.eql(2);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/classes"
+          }
+        },
+        {
+          "name": "03 - Get class by id",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('class payload matches', () => {",
+                  "  pm.expect(body.id).to.eql(pm.variables.get('classId'));",
+                  "  pm.expect(body.availableSeats).to.eql(2);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/classes/{{classId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 - Parent: hold, confirm, cancel",
+      "item": [
+        {
+          "name": "04 - Apply for a seat (student A)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.test('hold response contract', () => {",
+                  "  pm.expect(body.holdId).to.be.a('string');",
+                  "  pm.expect(body.classId).to.eql(pm.variables.get('classId'));",
+                  "  pm.expect(body.studentId).to.eql(pm.variables.get('studentA'));",
+                  "  pm.expect(body.status).to.eql('HELD');",
+                  "  pm.expect(body.expiresAt).to.be.a('string');",
+                  "});",
+                  "pm.collectionVariables.set('holdA', body.holdId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Student-Id",
+                "value": "{{studentA}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/classes/{{classId}}/holds",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "05 - Get application status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('application is HELD', () => {",
+                  "  pm.expect(body.holdId).to.eql(pm.variables.get('holdA'));",
+                  "  pm.expect(body.status).to.eql('HELD');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/holds/{{holdA}}"
+          }
+        },
+        {
+          "name": "06 - Duplicate active application is rejected",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 409', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Student-Id",
+                "value": "{{studentA}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/classes/{{classId}}/holds",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "07 - Class shows one held seat",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('held seats and availability are correct', () => {",
+                  "  pm.expect(body.heldSeats).to.eql(1);",
+                  "  pm.expect(body.confirmedSeats).to.eql(0);",
+                  "  pm.expect(body.availableSeats).to.eql(1);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/classes/{{classId}}"
+          }
+        },
+        {
+          "name": "08 - Confirm admission",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('application is CONFIRMED', () => {",
+                  "  pm.expect(body.holdId).to.eql(pm.variables.get('holdA'));",
+                  "  pm.expect(body.status).to.eql('CONFIRMED');",
+                  "  pm.expect(body.confirmedAt).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Student-Id",
+                "value": "{{studentA}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/holds/{{holdA}}/confirm",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "09 - Confirm again is idempotent",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('status stays CONFIRMED', () => pm.expect(body.status).to.eql('CONFIRMED'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Student-Id",
+                "value": "{{studentA}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/holds/{{holdA}}/confirm",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "10 - Repeating payment does not add a seat",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('confirmedSeats is still 1', () => {",
+                  "  pm.expect(body.confirmedSeats).to.eql(1);",
+                  "  pm.expect(body.heldSeats).to.eql(0);",
+                  "  pm.expect(body.availableSeats).to.eql(1);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/classes/{{classId}}"
+          }
+        },
+        {
+          "name": "11 - Cancelling a confirmed admission is rejected",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 409', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-Student-Id",
+                "value": "{{studentA}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/holds/{{holdA}}"
+          }
+        },
+        {
+          "name": "12 - My applications includes the confirmed hold",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const found = body.find((h) => h.holdId === pm.variables.get('holdA'));",
+                  "pm.test('application is listed with class name and status', () => {",
+                  "  pm.expect(found).to.be.an('object');",
+                  "  pm.expect(found.className).to.eql(pm.variables.get('className'));",
+                  "  pm.expect(found.status).to.eql('CONFIRMED');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Student-Id",
+                "value": "{{studentA}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/me/holds"
+          }
+        },
+        {
+          "name": "13 - Apply as student B",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('holdB', body.holdId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Student-Id",
+                "value": "{{studentB}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/classes/{{classId}}/holds",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "14 - Cancel student B (204)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-Student-Id",
+                "value": "{{studentB}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/holds/{{holdB}}"
+          }
+        },
+        {
+          "name": "15 - Cancel again is idempotent (204)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-Student-Id",
+                "value": "{{studentB}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/holds/{{holdB}}"
+          }
+        },
+        {
+          "name": "16 - Cancelled seat is available again",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('heldSeats released', () => {",
+                  "  pm.expect(body.heldSeats).to.eql(0);",
+                  "  pm.expect(body.availableSeats).to.eql(1);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/classes/{{classId}}"
+          }
+        },
+        {
+          "name": "17 - Apply as student C (released seat)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('holdC', body.holdId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Student-Id",
+                "value": "{{studentC}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/classes/{{classId}}/holds",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "18 - Cancel student C",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-Student-Id",
+                "value": "{{studentC}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/holds/{{holdC}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 - Ownership rules",
+      "item": [
+        {
+          "name": "19 - Student B applies for the last seat",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('holdB2', body.holdId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Student-Id",
+                "value": "{{studentB}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/classes/{{classId}}/holds",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "20 - Another student cannot confirm the application",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Student-Id",
+                "value": "{{studentC}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/holds/{{holdB2}}/confirm",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "21 - Another student cannot cancel the application",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-Student-Id",
+                "value": "{{studentC}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/holds/{{holdB2}}"
+          }
+        },
+        {
+          "name": "22 - Owner cancels the application",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-Student-Id",
+                "value": "{{studentB}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/holds/{{holdB2}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 - Capacity and seat release",
+      "item": [
+        {
+          "name": "23 - Create class with 2 seats",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('capacityClassId', body.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/classes",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{capacityClassName}}\",\n  \"totalSeats\": 2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "24 - Fill seat 1",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('capacityHoldA', body.holdId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Student-Id",
+                "value": "{{studentA}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/classes/{{capacityClassId}}/holds",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "25 - Fill seat 2",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('capacityHoldB', body.holdId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Student-Id",
+                "value": "{{studentB}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/classes/{{capacityClassId}}/holds",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "26 - Third application is rejected (full)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 409', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Student-Id",
+                "value": "{{studentC}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/classes/{{capacityClassId}}/holds",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "27 - Class is full",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('held + confirmed equals total seats', () => {",
+                  "  pm.expect(body.heldSeats).to.eql(2);",
+                  "  pm.expect(body.availableSeats).to.eql(0);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/classes/{{capacityClassId}}"
+          }
+        },
+        {
+          "name": "28 - Cancel a held seat",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-Student-Id",
+                "value": "{{studentA}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/holds/{{capacityHoldA}}"
+          }
+        },
+        {
+          "name": "29 - Released seat can be taken",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('capacityHoldC', body.holdId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Student-Id",
+                "value": "{{studentC}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/classes/{{capacityClassId}}/holds",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "30 - Class is full again",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('seat count never exceeds total', () => {",
+                  "  pm.expect(body.heldSeats + body.confirmedSeats).to.eql(body.totalSeats);",
+                  "  pm.expect(body.availableSeats).to.eql(0);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/classes/{{capacityClassId}}"
+          }
+        },
+        {
+          "name": "31 - Cleanup: cancel remaining seats",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-Student-Id",
+                "value": "{{studentB}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/holds/{{capacityHoldB}}"
+          }
+        },
+        {
+          "name": "32 - Cleanup: cancel last seat",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-Student-Id",
+                "value": "{{studentC}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/holds/{{capacityHoldC}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 - Invalid input returns 4xx",
+      "item": [
+        {
+          "name": "33 - Empty class body returns 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/classes",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "34 - Whitespace class name returns 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/classes",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"   \",\n  \"totalSeats\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "35 - Zero seats returns 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/classes",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Invalid zero seats\",\n  \"totalSeats\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "36 - Missing X-Student-Id returns 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/classes/{{classId}}/holds",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "37 - Overlong X-Student-Id returns 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Student-Id",
+                "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/classes/{{classId}}/holds",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "38 - Malformed JSON returns 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/classes",
+            "body": {
+              "mode": "raw",
+              "raw": "{bad json",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "39 - Unknown class returns 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/classes/00000000-0000-0000-0000-000000000000"
+          }
+        },
+        {
+          "name": "40 - Unknown application returns 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/holds/00000000-0000-0000-0000-000000000000"
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "studentA",
+      "value": "20152691234567890"
+    },
+    {
+      "key": "studentB",
+      "value": "20152690000000002"
+    },
+    {
+      "key": "studentC",
+      "value": "20152690000000003"
+    }
+  ]
+}
