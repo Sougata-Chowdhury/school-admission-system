@@ -1,33 +1,55 @@
 services:
   db:
     image: postgres:17
-    container_name: postgres-db
-    restart: always
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: myuser
-      POSTGRES_PASSWORD: mysecretpassword
-      POSTGRES_DB: school_admission
+      POSTGRES_USER: ${POSTGRES_USER:-myuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mysecretpassword}
+      POSTGRES_DB: ${POSTGRES_DB:-school_admission}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
+      # Named volume: data survives `docker compose down` and `up`.
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U myuser -d school_admission"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-myuser} -d ${POSTGRES_DB:-school_admission}",
+        ]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
 
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: school-admission-api
-    restart: always
+    restart: unless-stopped
     environment:
-      ConnectionStrings__DefaultConnection: "Host=db;Port=5432;Database=school_admission;Username=myuser;Password=mysecretpassword;"
-      HOLD_DURATION_SECONDS: "600"
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__DefaultConnection: "Host=db;Port=5432;Database=${POSTGRES_DB:-school_admission};Username=${POSTGRES_USER:-myuser};Password=${POSTGRES_PASSWORD:-mysecretpassword};"
+      HOLD_DURATION_SECONDS: "${HOLD_DURATION_SECONDS:-600}"
     ports:
       - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Optional bonus: a second API process on port 8081 using the SAME database.
+  # Start with: docker compose --profile multi up --build
+  backend-2:
+    profiles: ["multi"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__DefaultConnection: "Host=db;Port=5432;Database=${POSTGRES_DB:-school_admission};Username=${POSTGRES_USER:-myuser};Password=${POSTGRES_PASSWORD:-mysecretpassword};"
+      HOLD_DURATION_SECONDS: "${HOLD_DURATION_SECONDS:-600}"
+    ports:
+      - "8081:8080"
     depends_on:
       db:
         condition: service_healthy
@@ -36,14 +58,28 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: school-admission-ui
-    restart: always
+    restart: unless-stopped
     environment:
-      VITE_API_BASE_URL: "http://localhost:8080"
+      # Read at container start; written into /config.js by the nginx entrypoint.
+      VITE_API_BASE_URL: "${VITE_API_BASE_URL:-http://localhost:8080}"
     ports:
       - "5173:80"
     depends_on:
       - backend
+
+  # Optional: run the backend test suite entirely in Docker.
+  # Start the database first, then:
+  #   docker compose --profile test run --rm backend-tests
+  backend-tests:
+    profiles: ["test"]
+    build:
+      context: .
+      dockerfile: tests/Dockerfile
+    environment:
+      TEST_DB_CONNECTION: "Host=db;Port=5432;Database=school_admission_test;Username=${POSTGRES_USER:-myuser};Password=${POSTGRES_PASSWORD:-mysecretpassword};"
+    depends_on:
+      db:
+        condition: service_healthy
 
 volumes:
   postgres_data:
