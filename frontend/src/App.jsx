@@ -1,151 +1,262 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useEffect, useState } from 'react';
 import axios from 'axios';
+import { API_BASE_URL, getErrorMessage } from './api';
 import './App.css';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
+const MAX_STUDENT_ID_LENGTH = 100;
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('parent');
-  const [studentId, setStudentId] = useState(() => localStorage.getItem('studentId') || '');
+  const [activeView, setActiveView] = useState('parent');
+  const [studentId, setStudentId] = useState(
+    () => window.localStorage.getItem('studentId') || '',
+  );
+  const [tempStudentId, setTempStudentId] = useState(studentId);
   const [classes, setClasses] = useState([]);
   const [myHolds, setMyHolds] = useState([]);
-  const [errorMessage, setErrorMessage] = useState('');
-  const [now, setNow] = useState(new Date());
+  const [newClassName, setNewClassName] = useState('');
+  const [newTotalSeats, setNewTotalSeats] = useState(50);
+  const [actionError, setActionError] = useState('');
+  const [classesError, setClassesError] = useState('');
+  const [holdsError, setHoldsError] = useState('');
+  const [now, setNow] = useState(Date.now());
 
-  const [className, setClassName] = useState('');
-  const [totalSeats, setTotalSeats] = useState(50);
+  const errorMessage = actionError || classesError || holdsError;
 
+  // Drives the countdown and turns a HELD application into EXPIRED in the UI
+  // as soon as its deadline passes, without waiting for a page reload.
   useEffect(() => {
-    if (studentId) {
-      localStorage.setItem('studentId', studentId);
-    } else {
-      localStorage.removeItem('studentId');
-    }
-  }, [studentId]);
-
-  useEffect(() => {
-    fetchClasses();
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
   }, []);
-
-  useEffect(() => {
-    if (studentId) {
-      fetchMyHolds();
-    }
-  }, [studentId]);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      fetchClasses();
-      if (studentId) fetchMyHolds();
-      setNow(new Date());
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [studentId]);
 
   const fetchClasses = async () => {
     try {
-      const res = await axios.get(`${API_BASE_URL}/classes`);
-      setClasses(res.data);
-    } catch (err) {
-      setErrorMessage(err.response?.data?.message || 'Failed to sync class status from server.');
+      const response = await axios.get(`${API_BASE_URL}/classes`);
+      setClasses(Array.isArray(response.data) ? response.data : []);
+      setClassesError('');
+    } catch (error) {
+      setClassesError(
+        getErrorMessage(error, 'Could not load classes. Please try again.'),
+      );
     }
   };
 
   const fetchMyHolds = async () => {
-    if (!studentId.trim()) return;
+    if (!studentId) {
+      setMyHolds([]);
+      setHoldsError('');
+      return;
+    }
+
     try {
-      const res = await axios.get(`${API_BASE_URL}/me/holds`, {
-        headers: { 'X-Student-Id': studentId.trim() }
+      const response = await axios.get(`${API_BASE_URL}/me/holds`, {
+        headers: { 'X-Student-Id': studentId },
       });
-      setMyHolds(res.data);
-    } catch (err) {
-      setErrorMessage(err.response?.data?.message || 'Failed to fetch student application details.');
+      setMyHolds(Array.isArray(response.data) ? response.data : []);
+      setHoldsError('');
+    } catch (error) {
+      setHoldsError(
+        getErrorMessage(error, 'Could not load your applications. Please try again.'),
+      );
     }
   };
 
-  const handleCreateClass = async (e) => {
-    e.preventDefault();
-    setErrorMessage('');
+  // Seat counts must refresh periodically without a page reload.
+  useEffect(() => {
+    fetchClasses();
+    const interval = setInterval(fetchClasses, 2000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Applications are refreshed too, and reload automatically when the student
+  // identity changes or the page is reopened (studentId comes from localStorage).
+  useEffect(() => {
+    fetchMyHolds();
+    const interval = setInterval(fetchMyHolds, 3000);
+    return () => clearInterval(interval);
+  }, [studentId]);
+
+  const dismissError = () => {
+    setActionError('');
+    setClassesError('');
+    setHoldsError('');
+  };
+
+  const handleSaveStudentId = (event) => {
+    event.preventDefault();
+    setActionError('');
+
+    const value = tempStudentId.trim();
+    if (!value) {
+      setActionError('Please enter your birth registration number.');
+      return;
+    }
+
+    if (value.length > MAX_STUDENT_ID_LENGTH) {
+      setActionError(
+        `The birth registration number must be at most ${MAX_STUDENT_ID_LENGTH} characters.`,
+      );
+      return;
+    }
+
+    setStudentId(value);
+    setTempStudentId(value);
+    window.localStorage.setItem('studentId', value);
+  };
+
+  const handleClearStudentId = () => {
+    setStudentId('');
+    setTempStudentId('');
+    setMyHolds([]);
+    setHoldsError('');
+    setActionError('');
+    window.localStorage.removeItem('studentId');
+  };
+
+  const handleCreateClass = async (event) => {
+    event.preventDefault();
+    setActionError('');
+
+    const name = newClassName.trim();
+    const seats = Number(newTotalSeats);
+
+    if (!name) {
+      setActionError('Please enter a class name.');
+      return;
+    }
+
+    if (!Number.isInteger(seats) || seats < 1) {
+      setActionError('Total seats must be a whole number of at least 1.');
+      return;
+    }
+
     try {
-      await axios.post(`${API_BASE_URL}/classes`, {
-        name: className,
-        totalSeats: parseInt(totalSeats, 10)
-      });
-      setClassName('');
-      fetchClasses();
-    } catch (err) {
-      setErrorMessage(err.response?.data?.message || 'Failed to create class.');
+      await axios.post(`${API_BASE_URL}/classes`, { name, totalSeats: seats });
+      setNewClassName('');
+      setNewTotalSeats(50);
+      await fetchClasses();
+    } catch (error) {
+      setActionError(
+        getErrorMessage(error, 'Could not create the class. Please try again.'),
+      );
     }
   };
 
   const handleApply = async (classId) => {
-    setErrorMessage('');
-    if (!studentId.trim()) {
-      setErrorMessage('Please enter your 17-digit Birth Registration Number first.');
+    setActionError('');
+
+    if (!studentId) {
+      setActionError(
+        'Enter and save your birth registration number before applying.',
+      );
       return;
     }
+
     try {
-      await axios.post(`${API_BASE_URL}/classes/${classId}/holds`, {}, {
-        headers: { 'X-Student-Id': studentId.trim() }
-      });
-      fetchClasses();
-      fetchMyHolds();
-    } catch (err) {
-      setErrorMessage(err.response?.data?.message || 'Failed to reserve seat.');
+      await axios.post(
+        `${API_BASE_URL}/classes/${classId}/holds`,
+        {},
+        { headers: { 'X-Student-Id': studentId } },
+      );
+      await Promise.all([fetchClasses(), fetchMyHolds()]);
+    } catch (error) {
+      setActionError(
+        getErrorMessage(error, 'Could not apply for a seat. Please try again.'),
+      );
     }
   };
 
   const handleConfirm = async (holdId) => {
-    setErrorMessage('');
+    setActionError('');
+
     try {
-      await axios.post(`${API_BASE_URL}/holds/${holdId}/confirm`, {}, {
-        headers: { 'X-Student-Id': studentId.trim() }
-      });
-      fetchClasses();
-      fetchMyHolds();
-    } catch (err) {
-      setErrorMessage(err.response?.data?.message || 'Failed to confirm admission.');
+      await axios.post(
+        `${API_BASE_URL}/holds/${holdId}/confirm`,
+        {},
+        { headers: { 'X-Student-Id': studentId } },
+      );
+      await Promise.all([fetchClasses(), fetchMyHolds()]);
+    } catch (error) {
+      setActionError(
+        getErrorMessage(error, 'Could not confirm the admission. Please try again.'),
+      );
     }
   };
 
   const handleCancel = async (holdId) => {
-    setErrorMessage('');
+    setActionError('');
+
     try {
       await axios.delete(`${API_BASE_URL}/holds/${holdId}`, {
-        headers: { 'X-Student-Id': studentId.trim() }
+        headers: { 'X-Student-Id': studentId },
       });
-      fetchClasses();
-      fetchMyHolds();
-    } catch (err) {
-      setErrorMessage(err.response?.data?.message || 'Failed to cancel reservation.');
+      await Promise.all([fetchClasses(), fetchMyHolds()]);
+    } catch (error) {
+      setActionError(
+        getErrorMessage(error, 'Could not cancel the application. Please try again.'),
+      );
     }
   };
 
-  const getRemainingTime = (expiresAt) => {
-    const diff = new Date(expiresAt) - now;
-    if (diff <= 0) return 'Expired';
-    const mins = Math.floor(diff / 60000);
-    const secs = Math.floor((diff % 60000) / 1000);
-    return `${mins}m ${secs}s`;
+  const getRemainingSeconds = (expiresAt) => {
+    const expiresAtMs = new Date(expiresAt).getTime();
+    if (Number.isNaN(expiresAtMs)) {
+      return 0;
+    }
+
+    return Math.max(0, Math.floor((expiresAtMs - now) / 1000));
   };
+
+  const formatRemaining = (seconds) => {
+    const minutes = Math.floor(seconds / 60);
+    const remainder = seconds % 60;
+    return `${minutes}:${String(remainder).padStart(2, '0')}`;
+  };
+
+  const formatDateTime = (value) => {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? 'â€”' : date.toLocaleString();
+  };
+
+  const getDisplayStatus = (hold) => {
+    const status = hold.status || 'UNKNOWN';
+    if (status === 'HELD' && getRemainingSeconds(hold.expiresAt) <= 0) {
+      return 'EXPIRED';
+    }
+    return status;
+  };
+
+  const hasActiveApplication = (classId) =>
+    myHolds.some((hold) => {
+      if (hold.classId !== classId) {
+        return false;
+      }
+
+      const status = getDisplayStatus(hold);
+      return status === 'HELD' || status === 'CONFIRMED';
+    });
 
   return (
     <div className="app-container">
-      <header className="header">
-        <div>
-          <h1 className="brand-title">School Admission Portal</h1>
-          <p className="brand-subtitle">First-Come, First-Served Real-Time Seat Allocation</p>
+      <header className="top-header">
+        <div className="header-brand">
+          <h1>School Admission Portal</h1>
+          <p className="brand-subtitle">
+            First-come, first-served admission
+          </p>
         </div>
-        <nav className="nav-tabs">
-          <button 
-            className={`tab-btn ${activeTab === 'parent' ? 'active' : ''}`}
-            onClick={() => setActiveTab('parent')}
+        <nav className="view-nav" aria-label="Portal views">
+          <button
+            type="button"
+            className={`nav-btn ${activeView === 'parent' ? 'active' : ''}`}
+            onClick={() => setActiveView('parent')}
           >
             Parent Portal
           </button>
-          <button 
-            className={`tab-btn ${activeTab === 'admin' ? 'active' : ''}`}
-            onClick={() => setActiveTab('admin')}
+          <button
+            type="button"
+            className={`nav-btn ${activeView === 'admin' ? 'active' : ''}`}
+            onClick={() => setActiveView('admin')}
           >
             School Admin
           </button>
@@ -153,196 +264,267 @@ export default function App() {
       </header>
 
       {errorMessage && (
-        <div className="error-banner">
+        <div className="alert alert-error" role="alert" aria-live="polite">
           <span>{errorMessage}</span>
-          <button className="error-close-btn" onClick={() => setErrorMessage('')}>✕</button>
+          <button
+            type="button"
+            className="close-btn"
+            onClick={dismissError}
+            aria-label="Dismiss error"
+          >
+            Ã—
+          </button>
         </div>
       )}
 
-      {activeTab === 'parent' && (
-        <div>
-          <div className="card">
-            <h2 className="card-title">Student Identity verification</h2>
-            <div className="form-group">
-              <label className="form-label">Birth Registration Number (17 Digits)</label>
-              <input 
-                className="form-input"
-                type="text" 
-                placeholder="e.g. 20152691234567890" 
-                value={studentId}
-                onChange={(e) => setStudentId(e.target.value)}
+      {activeView === 'parent' && (
+        <main className="portal-content">
+          <section className="card identity-card">
+            <h2>Student Identity</h2>
+            <p className="text-muted">
+              No login is required. Enter the student&apos;s birth registration
+              number; it is remembered in this browser.
+            </p>
+            <form onSubmit={handleSaveStudentId} className="identity-form">
+              <label className="sr-only" htmlFor="student-id">
+                Birth registration number
+              </label>
+              <input
+                id="student-id"
+                type="text"
+                placeholder="e.g. 20152691234567890"
+                value={tempStudentId}
+                onChange={(event) => setTempStudentId(event.target.value)}
+                maxLength={MAX_STUDENT_ID_LENGTH}
+                autoComplete="off"
               />
-            </div>
-          </div>
+              <button type="submit" className="btn-primary">
+                Set Student ID
+              </button>
+              {studentId && (
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={handleClearStudentId}
+                >
+                  Clear
+                </button>
+              )}
+            </form>
+            {studentId && (
+              <p className="identity-status">
+                Active student ID: <strong>{studentId}</strong>
+              </p>
+            )}
+          </section>
 
-          <h2 className="section-title">Available Classes & Shifts</h2>
-          <div className="grid">
-            {classes.map((c) => {
-              const confirmedPct = (c.confirmedSeats / c.totalSeats) * 100;
-              const heldPct = (c.heldSeats / c.totalSeats) * 100;
-              const availablePct = (c.availableSeats / c.totalSeats) * 100;
+          <section className="card">
+            <h2>My Applications</h2>
+            {!studentId ? (
+              <p className="empty-state">
+                Enter your birth registration number above to see your
+                applications.
+              </p>
+            ) : myHolds.length === 0 ? (
+              <p className="empty-state">
+                You have not applied for any class yet.
+              </p>
+            ) : (
+              <div className="holds-grid">
+                {myHolds.map((hold) => {
+                  const displayStatus = getDisplayStatus(hold);
+                  const remainingSeconds = getRemainingSeconds(hold.expiresAt);
+                  const isHeld = displayStatus === 'HELD';
+                  const statusClass = displayStatus.toLowerCase();
 
-              return (
-                <div key={c.id} className="card">
-                  <h3 style={{ fontSize: '1.1rem', fontWeight: 600 }}>{c.name}</h3>
+                  return (
+                    <article
+                      key={hold.holdId}
+                      className={`hold-item status-${statusClass}`}
+                    >
+                      <div className="hold-header">
+                        <h3>{hold.className || 'Class application'}</h3>
+                        <span className={`status-pill ${statusClass}`}>
+                          {displayStatus}
+                        </span>
+                      </div>
 
-                  <div className="seat-meter-container">
-                    <div className="seat-meter-confirmed" style={{ width: `${confirmedPct}%` }} />
-                    <div className="seat-meter-held" style={{ width: `${heldPct}%` }} />
-                    <div className="seat-meter-available" style={{ width: `${availablePct}%` }} />
-                  </div>
+                      <p className="meta-line">
+                        Application: <code>{hold.holdId}</code>
+                      </p>
+                      <p className="meta-line">
+                        Expires: {formatDateTime(hold.expiresAt)}
+                      </p>
 
-                  <div className="seat-stats-grid">
-                    <div className="seat-stat-item">
-                      <span className="seat-stat-label">Available</span>
-                      <span className="seat-stat-value" style={{ color: '#2563eb' }}>{c.availableSeats}</span>
-                    </div>
-                    <div className="seat-stat-item">
-                      <span className="seat-stat-label">Held Seats</span>
-                      <span className="seat-stat-value" style={{ color: '#d97706' }}>{c.heldSeats}</span>
-                    </div>
-                    <div className="seat-stat-item">
-                      <span className="seat-stat-label">Confirmed</span>
-                      <span className="seat-stat-value" style={{ color: '#16a34a' }}>{c.confirmedSeats}</span>
-                    </div>
-                    <div className="seat-stat-item">
-                      <span className="seat-stat-label">Total Seats</span>
-                      <span className="seat-stat-value">{c.totalSeats}</span>
-                    </div>
-                  </div>
+                      {isHeld && (
+                        <p className="timer">
+                          Time remaining: <strong>{formatRemaining(remainingSeconds)}</strong>
+                        </p>
+                      )}
 
-                  <button 
-                    className={`btn ${c.availableSeats > 0 ? 'btn-primary' : 'btn-disabled'}`}
-                    disabled={c.availableSeats <= 0}
-                    onClick={() => handleApply(c.id)}
-                    style={{ width: '100%' }}
-                  >
-                    {c.availableSeats > 0 ? 'Apply Now' : 'Class Full'}
-                  </button>
-                </div>
-              );
-            })}
-          </div>
+                      <div className="hold-actions">
+                        <button
+                          type="button"
+                          className="btn-success"
+                          disabled={!isHeld || remainingSeconds <= 0}
+                          onClick={() => handleConfirm(hold.holdId)}
+                        >
+                          Pay Admission Fee
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-danger"
+                          disabled={!isHeld}
+                          onClick={() => handleCancel(hold.holdId)}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </section>
 
-          {studentId && (
-            <div style={{ marginTop: '2.5rem' }}>
-              <h2 className="section-title">My Applications</h2>
-              {myHolds.length === 0 ? (
-                <div className="empty-state">
-                  No active or past applications found for Student ID: <strong>{studentId}</strong>
-                </div>
-              ) : (
-                <div className="grid">
-                  {myHolds.map((h) => {
-                    const isExpired = h.status === 'EXPIRED' || (h.status === 'HELD' && new Date(h.expiresAt) <= now);
-                    const currentStatus = isExpired ? 'EXPIRED' : h.status;
+          <section className="card">
+            <h2>Available Classes</h2>
+            {classes.length === 0 ? (
+              <p className="empty-state">
+                No classes have been created yet. Ask the school admin to create
+                one.
+              </p>
+            ) : (
+              <div className="classes-grid">
+                {classes.map((schoolClass) => {
+                  const alreadyApplied = hasActiveApplication(schoolClass.id);
+                  const isFull = schoolClass.availableSeats <= 0;
+                  const cannotApply = !studentId || isFull || alreadyApplied;
 
-                    return (
-                      <div key={h.holdId} className="card">
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
-                          <h4 style={{ fontSize: '1rem', fontWeight: 600 }}>
-                            {h.className || `Class: ${h.classId.substring(0, 8)}...`}
-                          </h4>
-                          <span className={`badge badge-${currentStatus}`}>{currentStatus}</span>
+                  let buttonLabel = 'Apply';
+                  if (alreadyApplied) {
+                    buttonLabel = 'Already Applied';
+                  } else if (isFull) {
+                    buttonLabel = 'Seat Full';
+                  } else if (!studentId) {
+                    buttonLabel = 'Save ID to Apply';
+                  }
+
+                  return (
+                    <article key={schoolClass.id} className="class-card">
+                      <h3>{schoolClass.name}</h3>
+                      <div className="metrics">
+                        <div>
+                          <span>Available</span>
+                          <strong>{schoolClass.availableSeats}</strong>
                         </div>
-
-                        <p style={{ fontSize: '0.8rem', color: '#64748b' }}>Hold Ref: {h.holdId.substring(0, 13)}...</p>
-
-                        {currentStatus === 'HELD' && (
-                          <div className="timer-box">
-                            <span>⏱️ Hold Expiration:</span>
-                            <strong>{getRemainingTime(h.expiresAt)}</strong>
-                          </div>
-                        )}
-
-                        <div style={{ display: 'flex', gap: '8px', marginTop: '1.25rem' }}>
-                          <button 
-                            className={`btn ${currentStatus === 'HELD' ? 'btn-success' : 'btn-disabled'}`}
-                            disabled={currentStatus !== 'HELD'}
-                            onClick={() => handleConfirm(h.holdId)}
-                            style={{ flex: 1 }}
-                          >
-                            Pay Fee & Confirm
-                          </button>
-                          <button 
-                            className={`btn ${currentStatus !== 'CONFIRMED' ? 'btn-danger' : 'btn-disabled'}`}
-                            disabled={currentStatus === 'CONFIRMED'}
-                            onClick={() => handleCancel(h.holdId)}
-                            style={{ flex: 1 }}
-                          >
-                            Cancel
-                          </button>
+                        <div>
+                          <span>Held</span>
+                          <strong>{schoolClass.heldSeats}</strong>
+                        </div>
+                        <div>
+                          <span>Confirmed</span>
+                          <strong>{schoolClass.confirmedSeats}</strong>
+                        </div>
+                        <div>
+                          <span>Total</span>
+                          <strong>{schoolClass.totalSeats}</strong>
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+                      <button
+                        type="button"
+                        className="btn-primary full-width"
+                        disabled={cannotApply}
+                        onClick={() => handleApply(schoolClass.id)}
+                      >
+                        {buttonLabel}
+                      </button>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        </main>
       )}
 
-      {activeTab === 'admin' && (
-        <div>
-          <div className="card">
-            <h2 className="card-title">Create New Class / Shift</h2>
-            <form onSubmit={handleCreateClass}>
+      {activeView === 'admin' && (
+        <main className="portal-content">
+          <section className="card">
+            <h2>Create Class</h2>
+            <form onSubmit={handleCreateClass} className="admin-form">
               <div className="form-group">
-                <label className="form-label">Class & Shift Name</label>
-                <input 
-                  className="form-input"
-                  type="text" 
-                  placeholder="e.g. Class 6 - Morning Shift" 
-                  value={className}
-                  onChange={(e) => setClassName(e.target.value)}
-                  required 
+                <label htmlFor="class-name">Class and shift name</label>
+                <input
+                  id="class-name"
+                  type="text"
+                  placeholder="e.g. Class 6 - Morning Shift"
+                  value={newClassName}
+                  onChange={(event) => setNewClassName(event.target.value)}
+                  maxLength={255}
+                  required
                 />
               </div>
               <div className="form-group">
-                <label className="form-label">Total Seat Capacity</label>
-                <input 
-                  className="form-input"
-                  type="number" 
+                <label htmlFor="total-seats">Total seats</label>
+                <input
+                  id="total-seats"
+                  type="number"
                   min="1"
-                  value={totalSeats}
-                  onChange={(e) => setTotalSeats(e.target.value)}
-                  required 
+                  step="1"
+                  value={newTotalSeats}
+                  onChange={(event) => setNewTotalSeats(event.target.value)}
+                  required
                 />
               </div>
-              <button type="submit" className="btn btn-primary" style={{ marginTop: '0.5rem' }}>
-                Create Class Shift
+              <button type="submit" className="btn-primary">
+                Create Class
               </button>
             </form>
-          </div>
+          </section>
 
-          <h2 className="section-title">Active Seat Metrics</h2>
-          <div className="grid">
-            {classes.map((c) => (
-              <div key={c.id} className="card">
-                <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '1rem' }}>{c.name}</h3>
-                <div className="seat-stats-grid">
-                  <div className="seat-stat-item">
-                    <span className="seat-stat-label">Available</span>
-                    <span className="seat-stat-value" style={{ color: '#2563eb' }}>{c.availableSeats}</span>
-                  </div>
-                  <div className="seat-stat-item">
-                    <span className="seat-stat-label">Held</span>
-                    <span className="seat-stat-value" style={{ color: '#d97706' }}>{c.heldSeats}</span>
-                  </div>
-                  <div className="seat-stat-item">
-                    <span className="seat-stat-label">Confirmed</span>
-                    <span className="seat-stat-value" style={{ color: '#16a34a' }}>{c.confirmedSeats}</span>
-                  </div>
-                  <div className="seat-stat-item">
-                    <span className="seat-stat-label">Total</span>
-                    <span className="seat-stat-value">{c.totalSeats}</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+          <section className="card">
+            <h2>Class List</h2>
+            <div className="table-scroll">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Class Name</th>
+                    <th>Total Seats</th>
+                    <th>Held Seats</th>
+                    <th>Confirmed Seats</th>
+                    <th>Available Seats</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {classes.length === 0 ? (
+                    <tr>
+                      <td colSpan="5" className="empty-state">
+                        No classes created yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    classes.map((schoolClass) => (
+                      <tr key={schoolClass.id}>
+                        <td>
+                          <strong>{schoolClass.name}</strong>
+                        </td>
+                        <td>{schoolClass.totalSeats}</td>
+                        <td>{schoolClass.heldSeats}</td>
+                        <td>{schoolClass.confirmedSeats}</td>
+                        <td>
+                          <span className="badge-avail">
+                            {schoolClass.availableSeats}
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </main>
       )}
     </div>
   );
